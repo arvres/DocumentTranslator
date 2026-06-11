@@ -1,14 +1,10 @@
-
 import os
 import cv2
+import time
 
-# Biblioteca responsável pelo OCR
 from paddleocr import PaddleOCR
-
-# Biblioteca utilizada para tradução automática
 from deep_translator import GoogleTranslator
 
-# Bibliotecas para criação do PDF
 from reportlab.platypus import (
     SimpleDocTemplate,
     Paragraph,
@@ -22,231 +18,289 @@ from reportlab.lib import enums
 # CONFIGURAÇÕES DO PROJETO
 # ==================================================
 
-# Imagem que será processada
-IMAGEM = "imgs/doc2.jpg"
+# Pasta onde estão as imagens que serão processadas
+PASTA_IMAGENS = "imgs"
 
-# Caminho do PDF final
-PDF_SAIDA = "output/documento_traduzido.pdf"
+# Pasta onde os PDFs finais serão salvos
+PASTA_SAIDA = "output"
 
-# Cria a pasta de saída caso ela não exista
-os.makedirs("output", exist_ok=True)
+# Idioma base esperado pelo OCR
+IDIOMA_OCR = "en"
+
+# Garante que a pasta de saída exista
+os.makedirs(PASTA_SAIDA, exist_ok=True)
+
 
 # ==================================================
-# INICIALIZAÇÃO DO OCR
+# OCR (RECONHECIMENTO DE TEXTO NA IMAGEM)
 # ==================================================
 
-print("==================================================")
-print("----------- Inicializando PaddleOCR... ---------")
-print("==================================================")
+def inicializar_ocr():
+    """
+    Inicializa o modelo PaddleOCR apenas uma vez
+    para melhorar performance.
+    """
+
+    print("\nInicializando PaddleOCR...\n")
+
+    return PaddleOCR(
+        use_angle_cls=True,  # Corrige textos inclinados/rotacionados
+        lang=IDIOMA_OCR      # Otimiza para idioma inglês
+    )
 
 
-# cria o modelo OCR
-ocr = PaddleOCR(
-    use_angle_cls=True, # corrige textos inclinados ou rotacionados
-    lang="en" # otimizado para documentos em inglês
-)
+def extrair_blocos(ocr, caminho_imagem):
+    """
+    Executa OCR na imagem e retorna blocos de texto com posição.
+    """
 
-# Carrega a imagem
-imagem = cv2.imread(IMAGEM)
+    # Lê imagem com OpenCV
+    imagem = cv2.imread(caminho_imagem)
 
-# Verificação de segurança
-if imagem is None:
-    raise Exception("Não foi possível abrir a imagem.")
+    # Validação: imagem precisa existir
+    if imagem is None:
+        raise FileNotFoundError(f"Imagem inválida ou corrompida: {caminho_imagem}")
+
+    # Executa OCR
+    resultado = ocr.ocr(imagem, cls=True)
+
+    # Caso OCR não retorne nada
+    if not resultado or not resultado[0]:
+        return []
+
+    blocos = []
+
+    # Percorre todos os textos detectados
+    for item in resultado[0]:
+
+        # Bounding box do texto (coordenadas)
+        bbox = item[0]
+
+        # Texto reconhecido
+        texto = item[1][0]
+
+        # Confiança do OCR (0 a 1)
+        confianca = item[1][1]
+
+        # Coordenada Y superior (usada para ordenar leitura)
+        y_top = min(p[1] for p in bbox)
+
+        blocos.append({
+            "texto": texto,
+            "y": y_top,
+            "confianca": confianca
+        })
+
+    return blocos
+
 
 # ==================================================
-# EXECUÇÃO DO OCR
+# AGRUPAMENTO DE TEXTO EM PARÁGRAFOS
 # ==================================================
 
-# O PaddleOCR retorna:
+def agrupar_paragrafos(blocos):
+    """
+    Agrupa linhas detectadas pelo OCR em parágrafos
+    com base na proximidade vertical.
+    """
 
-# - Bounding Box (posição do texto)
-# - Texto reconhecido
-# - Confiança da leitura
+    # Ordena blocos de cima para baixo
+    blocos.sort(key=lambda x: x["y"])
 
-resultado = ocr.ocr(imagem, cls=True)
+    paragrafos = []
+    paragrafo_atual = ""
+    ultimo_y = None
 
-# ==================================================
-# EXTRAÇÃO DOS BLOCOS DE TEXTO
-# ==================================================
+    # Distância máxima para considerar mesma linha/parágrafo
+    DISTANCIA_MAXIMA = 18
 
-print("==================================================")
-print("-------------- Extraindo blocos... --------------")
-print("==================================================")
+    for bloco in blocos:
 
-blocos = []
+        texto = bloco["texto"]
+        y = bloco["y"]
 
-for item in resultado[0]:
+        # Primeiro elemento
+        if ultimo_y is None:
+            paragrafo_atual = texto
 
-    # Coordenadas do bloco
-    bbox = item[0]
+        # Se estiver próximo verticalmente, junta no mesmo parágrafo
+        elif abs(y - ultimo_y) <= DISTANCIA_MAXIMA:
+            paragrafo_atual += " " + texto
 
-    # Texto reconhecido
-    texto = item[1][0]
+        # Caso contrário, inicia novo parágrafo
+        else:
+            paragrafos.append(paragrafo_atual)
+            paragrafo_atual = texto
 
-    # Coordenada superior do bloco utilizada para ordenar o documento
-    y_top = min(p[1] for p in bbox)
+        ultimo_y = y
 
-    blocos.append({"texto": texto, "y": y_top})
-
-# ==================================================
-# ORDENAÇÃO DOS BLOCOS
-# ==================================================
-
-# Organiza todos os textos de cima para baixo para reconstruir a ordem correta do documento
-
-blocos.sort(key=lambda x: x["y"])
-
-# ==================================================
-# AGRUPAMENTO DE PARÁGRAFOS
-# ==================================================
-print("==================================================")
-print("------------ Agrupando parágrafos... ------------")
-print("==================================================")
-
-paragrafos = []
-
-paragrafo_atual = ""
-
-ultimo_y = None
-
-# Distância máxima (em pixels) para considerar que duas linhas pertencem ao mesmo parágrafo
-DISTANCIA_MAXIMA = 18
-
-for bloco in blocos:
-
-    texto = bloco["texto"]
-    y = bloco["y"]
-
-    # Primeiro bloco encontrado
-
-    if ultimo_y is None:
-
-        paragrafo_atual = texto
-
-    # Se as linhas estiverem próximas elas serão unidas em um mesmo parágrafo
-
-    elif abs(y - ultimo_y) <= DISTANCIA_MAXIMA:
-
-        paragrafo_atual += " " + texto
-
-    # Caso contrário inicia um novo parágrafo
-
-    else:
-
+    # Adiciona último parágrafo
+    if paragrafo_atual:
         paragrafos.append(paragrafo_atual)
 
-        paragrafo_atual = texto
+    return paragrafos
 
-    ultimo_y = y
-
-# Adiciona o último parágrafo
-
-if paragrafo_atual:
-    paragrafos.append(paragrafo_atual)
-
-print("==================================================")
-print(f"--------- {len(paragrafos)} parágrafos encontrados. ---------")
-print("==================================================")
 
 # ==================================================
-# TRADUÇÃO
+# TRADUÇÃO AUTOMÁTICA
 # ==================================================
 
-print("==================================================")
-print("------------- Traduzindo conteúdo... -----------")
-print("==================================================")
+def traduzir_paragrafos(paragrafos):
+    """
+    Traduz cada parágrafo para português usando GoogleTranslator.
+    Usa cache para evitar traduções repetidas.
+    """
 
-# Cache para evitar traduzir o mesmo texto várias vezes
-cache = {}
+    cache = {}
+    resultado = []
 
-paragrafos_traduzidos = []
+    for texto in paragrafos:
 
-for texto in paragrafos:
+        texto = texto.strip()
 
-    texto = texto.strip()
+        # Ignora textos muito curtos
+        if len(texto) < 2:
+            continue
 
-    # Ignora textos muito pequenos
+        # Cache evita chamadas repetidas
+        if texto in cache:
+            traducao = cache[texto]
 
-    if len(texto) < 2:
-        continue
+        else:
+            try:
+                traducao = GoogleTranslator(source="auto", target="pt").translate(texto)
 
-    # Verifica se já foi traduzido
+            except:
+                # fallback: mantém original caso falhe
+                traducao = texto
 
-    if texto in cache:
+            cache[texto] = traducao
 
-        traducao = cache[texto]
+        resultado.append({"original": texto,"traducao": traducao})
 
-    else:
+        print(f"✓ Tradução: {traducao[:60]}")
 
-        try:
+    return resultado
 
-            traducao = GoogleTranslator(source="auto", target="pt").translate(texto)
 
-        except Exception:
 
-            # Caso a tradução falhe
-            # mantém o texto original
-
-            traducao = texto
-
-        cache[texto] = traducao
-
-    paragrafos_traduzidos.append(traducao)
-
-    print("OK ->", traducao[:60])
 
 # ==================================================
-# CRIAÇÃO DO PDF
+# GERAÇÃO DE PDF
 # ==================================================
 
-print("==================================================")
-print("----------------- Gerando PDF... -----------------")
-print("==================================================")
+def gerar_pdf(nome_arquivo, traducoes):
+    """
+    Gera um PDF final com os textos traduzidos e refinados.
+    """
 
-# Cria documento PDF
-doc = SimpleDocTemplate(PDF_SAIDA)
+    pdf_saida = os.path.join(PASTA_SAIDA, f"{nome_arquivo}_traduzido.pdf")
 
-# Estilos prontos do ReportLab
-styles = getSampleStyleSheet()
+    # Cria estrutura do PDF
+    doc = SimpleDocTemplate(pdf_saida)
 
-# Estilo para títulos
-titulo_style = styles["Heading2"]
-titulo_style.alignment = enums.TA_CENTER
+    # Estilos padrão do ReportLab
+    styles = getSampleStyleSheet()
 
-# Estilo para parágrafos
-texto_style = styles["BodyText"]
+    # Estilo de título
+    titulo_style = styles["Heading2"]
+    titulo_style.alignment = enums.TA_CENTER
 
-# Espaçamento entre linhas
-texto_style.leading = 18
+    # Estilo de texto normal
+    texto_style = styles["BodyText"]
+    texto_style.leading = 18  # espaçamento entre linhas
 
-conteudo = []
+    conteudo = []
+
+    for item in traducoes:
+
+        texto = item["traducao"].strip()
+
+        # Heurística simples para detectar título
+        eh_titulo = (len(texto.split()) <= 5 or texto.isupper())
+
+        if eh_titulo:
+            conteudo.append(Paragraph(texto, titulo_style))
+        else:
+            conteudo.append(Paragraph(texto, texto_style))
+
+        # Espaço entre blocos
+        conteudo.append(Spacer(1, 10))
+
+    # Gera PDF final
+    doc.build(conteudo)
+
+    return pdf_saida
+
 
 # ==================================================
-# RECONSTRUÇÃO DO DOCUMENTO
+# PIPELINE PRINCIPAL
 # ==================================================
 
-for texto in paragrafos_traduzidos:
+def processar_documento(ocr, caminho_imagem):
+    """
+    Pipeline completo para uma imagem:
+    OCR → Agrupamento → Tradução → IA → PDF
+    """
 
-    texto_limpo = texto.strip()
+    inicio = time.time()
 
-    # Regra simples:
-    # Se o texto for curto e estiver totalmente em maiúsculo, assume que é um título
+    nome = os.path.splitext(os.path.basename(caminho_imagem))[0]
 
-    if (len(texto_limpo) < 40 and texto_limpo.upper() == texto_limpo):
-        conteudo.append(Paragraph(texto_limpo, titulo_style))
-    else:
-        conteudo.append(Paragraph(texto_limpo, texto_style))
+    print("\n============================================================")
+    print(f"Processando: {nome}")
+    print("============================================================")
 
-    # Espaço entre blocos
-    conteudo.append(Spacer(1, 10))
+    # 1. OCR
+    blocos = extrair_blocos(ocr, caminho_imagem)
+
+    # 2. Agrupamento de linhas em parágrafos
+    paragrafos = agrupar_paragrafos(blocos)
+
+    # 3. Tradução automática
+    traducoes = traduzir_paragrafos(paragrafos)
+
+    # 5. Geração do PDF final
+    pdf = gerar_pdf(nome, traducoes)
+
+    print(f"PDF gerado: {pdf}")
+    print(f"Tempo: {time.time() - inicio:.2f}s")
+
 
 # ==================================================
-# GERAÇÃO FINAL DO PDF
+# MAIN
 # ==================================================
 
-doc.build(conteudo)
-print("==================================================")
-print("------------ PDF criado com sucesso! -------------")
-print("==================================================")
+def main():
+    """
+    Executa o sistema para todas as imagens da pasta.
+    """
+
+    inicio_total = time.time()
+
+    # Inicializa OCR uma única vez (otimização importante)
+    ocr = inicializar_ocr()
+
+    # Filtra imagens válidas
+    imagens = [
+        arquivo for arquivo in os.listdir(PASTA_IMAGENS)
+        if arquivo.lower().endswith((".jpg", ".jpeg", ".png"))
+    ]
+
+    # Caso não existam imagens
+    if not imagens:
+        print("Nenhuma imagem encontrada.")
+        return
+
+    # Processa cada imagem individualmente
+    for imagem in imagens:
+        caminho = os.path.join(PASTA_IMAGENS, imagem)
+        processar_documento(ocr, caminho)
+
+    print("\nPROCESSAMENTO FINALIZADO")
+    print(f"Tempo total: {time.time() - inicio_total:.2f}s")
 
 
+# Executa o programa
+if __name__ == "__main__":
+    main()
