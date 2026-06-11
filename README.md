@@ -138,16 +138,16 @@ pip install -r requirements.txt
 
 ## ▶️ Execução
 
-Adicione a imagem que deseja traduzir dentro da pasta:
+Adicione as imagens que deseja traduzir dentro da pasta:
 
 ```text
 imgs/
 ```
 
-Altere o caminho da imagem no arquivo:
+Altere o caminho da pasta no arquivo:
 
 ```python
-IMAGEM = "imgs/SUA-IMAGEM"
+PASTA_SAIDA = "PASTA-DE-SAIDA"
 ```
 
 Execute:
