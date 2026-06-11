@@ -1,6 +1,7 @@
 import os
 import cv2
 import time
+import json
 
 from paddleocr import PaddleOCR
 from deep_translator import GoogleTranslator
@@ -233,6 +234,22 @@ def gerar_pdf(nome_arquivo, traducoes):
     return pdf_saida
 
 
+#===================================================
+# GERANDO UM ARQUIVO JSON
+#===================================================
+
+def gerar_json(nome_arquivo, traducoes):
+
+    # Cria um arquivo JSON contendo texto original e texto traduzido
+
+    caminho_json = os.path.join(PASTA_SAIDA, f"{nome_arquivo}.json")
+
+    with open(caminho_json, "w", encoding="utf-8") as arquivo:
+        json.dump(traducoes, arquivo, ensure_ascii=False, indent=4)
+
+    return caminho_json
+
+
 # ==================================================
 # PIPELINE PRINCIPAL
 # ==================================================
@@ -240,7 +257,7 @@ def gerar_pdf(nome_arquivo, traducoes):
 def processar_documento(ocr, caminho_imagem):
     """
     Pipeline completo para uma imagem:
-    OCR → Agrupamento → Tradução → IA → PDF
+    OCR → Agrupamento → Tradução → PDF
     """
 
     inicio = time.time()
@@ -260,8 +277,12 @@ def processar_documento(ocr, caminho_imagem):
     # 3. Tradução automática
     traducoes = traduzir_paragrafos(paragrafos)
 
+    # 4. Geração do JSON 
+    json = gerar_json(nome,traducoes)
+
     # 5. Geração do PDF final
     pdf = gerar_pdf(nome, traducoes)
+
 
     print(f"PDF gerado: {pdf}")
     print(f"Tempo: {time.time() - inicio:.2f}s")
