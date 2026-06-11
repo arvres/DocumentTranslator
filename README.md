@@ -1,4 +1,5 @@
 # 📄 Document Translator
+![Python](https://img.shields.io/badge/Python-3.11.x-blue)
 
 Um tradutor de documentos baseado em OCR (Reconhecimento Óptico de Caracteres) e Inteligência Artificial, capaz de extrair texto de imagens, traduzir automaticamente para português e gerar um PDF pesquisável com o conteúdo traduzido.
 
